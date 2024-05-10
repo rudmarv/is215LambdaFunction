@@ -25,25 +25,42 @@ exports.handler = async(event) => {
         };
         const response = await rekognition.detectFaces(rekognitionParams).promise();
 
+        // Check if no faces are detected
+        if (!response.FaceDetails || response.FaceDetails.length === 0) {
+            // Delete the object from the S3 bucket
+            await s3.deleteObject({
+                Bucket: bucket,
+                Key: objectKey
+            }).promise();
+
+            // Return a response indicating no facial recognition
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'No faces detected in the uploaded image' })
+            };
+        }
+
+        // If faces are detected, proceed with generating the article
+
         // Collect all face details and put in one sentence.
-        let facedetails = ""
-        const age = Math.floor((response.FaceDetails[0].AgeRange.Low+response.FaceDetails[0].AgeRange.High) /2)
+        let facedetails = "";
+        const age = Math.floor((response.FaceDetails[0].AgeRange.Low + response.FaceDetails[0].AgeRange.High) / 2);
+        facedetails += age + " years old, ";
 
-        facedetails += age+" years old, ";
-
-        if (response.FaceDetails[0].Sunglasses.Value){
+        if (response.FaceDetails[0].Sunglasses.Value) {
             facedetails += "using sunglasses, ";
         }
         const gender = response.FaceDetails[0].Gender.Value;
-        facedetails += "gender is "+gender+", " ;
-        if (response.FaceDetails[0].Beard.Value){
+        facedetails += "gender is " + gender + ", ";
+        if (response.FaceDetails[0].Beard.Value) {
             facedetails += "with beard, ";
         }
-        if (response.FaceDetails[0].Mustache.Value){
+        if (response.FaceDetails[0].Mustache.Value) {
             facedetails += "with mustache, ";
         }
         const emotion = response.FaceDetails[0].Emotions[0].Type;
-        facedetails += "and emotion is "+emotion;
+        facedetails += "and emotion is " + emotion;
+
         // Call the OpenAI API to generate articles based on the selected face details
         const openaiEndpoint = 'https://api.openai.com/v1/engines/gpt-3.5-turbo-instruct/completions';
         const openaiApiKey = process.env.OPEN_API_KEY; // Replace with your OpenAI API key
@@ -65,18 +82,18 @@ exports.handler = async(event) => {
             prompt: "create a title for this story: " + articles,
             max_tokens: 100
         };
-        let openaiResponseTitle = await axios.post(openaiEndpoint, dataTitle, { headers });
-        let openaiResultTitle = openaiResponseTitle.data;
-        let title = openaiResultTitle.choices[0].text;
-        
+        const openaiResponseTitle = await axios.post(openaiEndpoint, dataTitle, { headers });
+        const openaiResultTitle = openaiResponseTitle.data;
+        const title = openaiResultTitle.choices[0].text;
+
         const jsonData = {
             "title": title,
             "article": articles
         };
+
         // Store the generated article in a new S3 bucket
         const resultBucket = bucket;
-        //const resultKey = `${selectedNode}-article.txt`; 
-        const resultKey = `articles/${filename}-article.json`; //sa folder na article, yung filename ay yung naupload na filename din
+        const resultKey = `articles/${filename}-article.json`;
 
         await s3.putObject({
             Bucket: resultBucket,
@@ -85,9 +102,7 @@ exports.handler = async(event) => {
         }).promise();
 
         // Return the URL of the generated article stored in S3
-        //after magresponse ng fileupload, kailngan ulit ng http request para kunin ung laman ng url na ito
-        const articleUrl = `https://s3.amazonaws.com/${resultBucket}/${filename}`; 
-        
+        const articleUrl = `https://s3.amazonaws.com/${resultBucket}/${filename}`;
 
         return {
             statusCode: 200,
